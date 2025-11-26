@@ -1,0 +1,114 @@
+---
+- name: General setup for all VMs
+  hosts: all
+  become: yes
+  tasks:
+    # Step 4: Register SSH Keys
+    - name: Register SSH keys from team members
+      authorized_key:
+        user: vagrant
+        state: present
+        key: "{{ lookup('file', item) }}"
+      loop: "{{ query('fileglob', '/vagrant/ssh-keys/*.pub') }}"
+
+    # Step 5: Disable SWAP
+    - name: Disable swap in running system
+      shell: swapoff -a
+
+    - name: Remove swap entry from /etc/fstab
+      lineinfile:
+        path: /etc/fstab
+        regexp: '.*swap.*'
+        state: absent
+
+    # Step 6: br_netfilter
+    - name: Create k8s.conf for module loading
+      copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/k8s.conf
+
+    - name: Load br_netfilter module
+      modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Load overlay module
+      modprobe:
+        name: overlay
+        state: present
+
+    # Step 7: Enable IPv4 forwarding
+    - name: Enable net.ipv4.ip_forward
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Enable net.bridge.bridge-nf-call-iptables
+      sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Enable net.bridge.bridge-nf-call-ip6tables
+      sysctl:
+        name: net.bridge.bridge-nf-call-ip6tables
+        value: '1'
+        state: present
+        reload: yes
+
+    # Step 8: Manage /etc/hosts
+    - name: Add ctrl to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "192.168.56.100 ctrl"
+        state: present
+
+    - name: Add node-1 to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "192.168.56.101 node-1"
+        state: present
+
+    - name: Add node-2 to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "192.168.56.102 node-2"
+        state: present
+
+    # Step 9: Add Kubernetes repository
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: yes
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Kubernetes apt signing key
+      apt_key:
+        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+        keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        state: present
+
+    - name: Add Kubernetes repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        state: present
+        filename: kubernetes
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes

@@ -1,11 +1,9 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-# Number of worker nodes (configurable)
 NUM_WORKERS = 2
 
 Vagrant.configure("2") do |config|
-  # Base box for all VMs
   config.vm.box = "bento/ubuntu-24.04"
 
   # Control node
@@ -17,9 +15,18 @@ Vagrant.configure("2") do |config|
       vb.memory = "4096"
       vb.cpus = 1
     end
+
+    # Ansible provisioning for control node
+    ctrl.vm.provision "ansible_local" do |ansible|
+      ansible.playbook = "ansible/general.yaml"
+    end
+
+    ctrl.vm.provision "ansible_local" do |ansible|
+      ansible.playbook = "ansible/ctrl.yaml"
+    end
   end
 
-  # Worker nodes
+  # Worker nodes 
   (1..NUM_WORKERS).each do |i|
     config.vm.define "node-#{i}" do |node|
       node.vm.hostname = "node-#{i}"
@@ -28,6 +35,15 @@ Vagrant.configure("2") do |config|
       node.vm.provider "virtualbox" do |vb|
         vb.memory = "6144"
         vb.cpus = 2
+      end
+
+      # Ansible provisioning for worker nodes
+      node.vm.provision "ansible_local" do |ansible|
+        ansible.playbook = "ansible/general.yaml"
+      end
+
+      node.vm.provision "ansible_local" do |ansible|
+        ansible.playbook = "ansible/node.yaml"
       end
     end
   end
