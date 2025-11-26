@@ -44,7 +44,7 @@ NUM_WORKERS = 2  # Change this number to scale up or down
 ```bash
 vagrant up
 ```
-## If KVM is conflicting temporarily disable it 
+### If KVM is conflicting temporarily disable it 
 ```bash
 sudo modprobe -r kvm_intel kvm
 ```
