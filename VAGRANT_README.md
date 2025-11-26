@@ -4,8 +4,19 @@ This directory contains the Vagrant configuration for setting up a Kubernetes cl
 
 ## Prerequisites
 
-- [Vagrant](https://www.vagrantup.com/downloads) installed
+- [Vagrant](https://www.vagrantup.com/downloads) installed 
 - [VirtualBox](https://www.virtualbox.org/wiki/Downloads) installed
+
+```bash
+sudo apt update
+sudo apt install virtualbox
+```
+
+## Test installations
+```bash
+vagrant --version
+vboxmanage --version
+```
 
 ## Configuration
 
@@ -24,14 +35,18 @@ NUM_WORKERS = 2  # Change this number to scale up or down
 
 ## Network Configuration
 
-- Control node: `192.168.56.10`
-- Worker node-N: `192.168.56.1{0+N}`
+- Control node: `192.168.56.100`
+- Worker node-N: `192.168.56.{100+N}`
 
 ## Usage
 
 ### Start all VMs
 ```bash
 vagrant up
+```
+## If KVM is conflicting temporarily disable it 
+```bash
+sudo modprobe -r kvm_intel kvm
 ```
 
 ### Start specific VM
@@ -68,9 +83,7 @@ vagrant reload
 
 ## Resource Adjustments
 
-If your computer is resource-limited, you can adjust the memory and CPU settings in the `Vagrantfile`:
+Resources and VM configs can be adjusted in the `Vagrantfile`:
 
 - For control node: Modify `vb.memory` and `vb.cpus` in the `ctrl` block
 - For worker nodes: Modify `vb.memory` and `vb.cpus` in the worker node block
-
-**Note**: Using one worker with more memory is usually better than multiple workers with less memory.

@@ -62,35 +62,17 @@
         reload: yes
 
     # Step 8: Manage /etc/hosts
-    - name: Add ctrl to /etc/hosts
-      lineinfile:
+    - name: Add cluster nodes to /etc/hosts
+      blockinfile:
         path: /etc/hosts
-        line: "192.168.56.100 ctrl"
-        state: present
-
-    - name: Add node-1 to /etc/hosts
-      lineinfile:
-        path: /etc/hosts
-        line: "192.168.56.101 node-1"
-        state: present
-
-    - name: Add node-2 to /etc/hosts
-      lineinfile:
-        path: /etc/hosts
-        line: "192.168.56.102 node-2"
-        state: present
+        block: |
+          192.168.56.100 ctrl
+          {% for i in range(1, num_workers|int + 1) %}
+          192.168.56.{{ 100 + i }} node-{{ i }}
+          {% endfor %}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - K8S HOSTS"
 
     # Step 9: Add Kubernetes repository
-    - name: Install required packages
-      apt:
-        name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - gnupg
-        state: present
-        update_cache: yes
-
     - name: Create keyrings directory
       file:
         path: /etc/apt/keyrings
@@ -98,17 +80,80 @@
         mode: '0755'
 
     - name: Add Kubernetes apt signing key
-      apt_key:
-        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
-        keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-        state: present
+      shell: gpg --dearmor < /vagrant/Release.key > /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     - name: Add Kubernetes repository
       apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /"
         state: present
         filename: kubernetes
 
     - name: Update apt cache
       apt:
         update_cache: yes
+
+    # Step 10: Install K8s tools
+    - name: Install containerd and runc
+      apt:
+        name:
+          - containerd=1.7.24*
+          - runc=1.1.12*
+          - kubelet=1.32.4*
+          - kubeadm=1.32.4*
+          - kubectl=1.32.4*
+        state: present
+
+    - name: Hold packages
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - containerd
+        - runc
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    # Step 11: Configure Containerd
+    - name: Create containerd config directory
+      file:
+        path: /etc/containerd
+        state: directory
+
+    - name: Generate default containerd config
+      shell: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Disable AppArmor in containerd
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*disable_apparmor\s*='
+        line: '    disable_apparmor = true'
+
+    - name: Update sandbox image
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*sandbox_image\s*='
+        line: '    sandbox_image = "registry.k8s.io/pause:3.10"'
+
+    - name: Set SystemdCgroup
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*SystemdCgroup\s*='
+        line: '            SystemdCgroup = true' # The indentation is intentional to match the file original format
+
+    - name: Restart containerd
+      service:
+        name: containerd
+        state: restarted
+        enabled: yes
+
+    # Step 12: Kubelet
+    - name: Start and enable kubelet
+      service:
+        name: kubelet
+        state: started
+        enabled: yes

@@ -6,19 +6,22 @@ NUM_WORKERS = 2
 Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-24.04"
 
-  # Control node
+  # Control node - Step 1 
   config.vm.define "ctrl" do |ctrl|
     ctrl.vm.hostname = "ctrl"
-    ctrl.vm.network "private_network", ip: "192.168.56.100"
+    ctrl.vm.network "private_network", ip: "192.168.56.100" # Networking - Step 2
     
     ctrl.vm.provider "virtualbox" do |vb|
       vb.memory = "4096"
       vb.cpus = 1
     end
 
-    # Ansible provisioning for control node
+    # Ansible provisioning for control node - Step 3
     ctrl.vm.provision "ansible_local" do |ansible|
       ansible.playbook = "ansible/general.yaml"
+      ansible.extra_vars = {
+        num_workers: NUM_WORKERS
+      }
     end
 
     ctrl.vm.provision "ansible_local" do |ansible|
@@ -26,20 +29,23 @@ Vagrant.configure("2") do |config|
     end
   end
 
-  # Worker nodes 
+  # Worker nodes - Step 1 
   (1..NUM_WORKERS).each do |i|
     config.vm.define "node-#{i}" do |node|
       node.vm.hostname = "node-#{i}"
-      node.vm.network "private_network", ip: "192.168.56.#{100 + i}"
+      node.vm.network "private_network", ip: "192.168.56.#{100 + i}" # Networking - Step 2
       
       node.vm.provider "virtualbox" do |vb|
         vb.memory = "6144"
         vb.cpus = 2
       end
 
-      # Ansible provisioning for worker nodes
+      # Ansible provisioning for worker nodes - Step 3
       node.vm.provision "ansible_local" do |ansible|
         ansible.playbook = "ansible/general.yaml"
+        ansible.extra_vars = {
+          num_workers: NUM_WORKERS
+        }
       end
 
       node.vm.provision "ansible_local" do |ansible|
