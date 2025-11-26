@@ -79,19 +79,21 @@
         state: directory
         mode: '0755'
 
-    - name: Add Kubernetes apt signing key
+    - name: Add Kubernetes apt signing key from local file
       shell: gpg --dearmor < /vagrant/Release.key > /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       args:
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Set keyring permissions
+      file:
+        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
 
     - name: Add Kubernetes repository
       apt_repository:
         repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /"
         state: present
         filename: kubernetes
-
-    - name: Update apt cache
-      apt:
         update_cache: yes
 
     # Step 10: Install K8s tools

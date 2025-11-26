@@ -13,14 +13,14 @@ Vagrant.configure("2") do |config|
     
     ctrl.vm.provider "virtualbox" do |vb|
       vb.memory = "4096"
-      vb.cpus = 1
+      vb.cpus = 2
     end
 
     # Ansible provisioning for control node - Step 3
     ctrl.vm.provision "ansible_local" do |ansible|
       ansible.playbook = "ansible/general.yaml"
       ansible.extra_vars = {
-        num_workers: NUM_WORKERS
+        num_workers: NUM_WORKERS # Step 8 -> Technicaly not needed here but since general.yaml uses it is good practice to pass it to all VMs
       }
     end
 

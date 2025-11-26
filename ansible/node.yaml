@@ -8,7 +8,3 @@
         path: /vagrant/join-command.sh
         timeout: 300
 
-    - name: Join Kubernetes cluster
-      shell: /vagrant/join-command.sh
-      args:
-        creates: /etc/kubernetes/kubelet.conf
