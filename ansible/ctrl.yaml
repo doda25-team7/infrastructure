@@ -3,10 +3,19 @@
   hosts: all
   become: yes
   tasks:
+    - name: Check if cluster is already initialized
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: k8s_admin_conf
+
     - name: Initialize Kubernetes cluster
-      shell: kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=192.168.56.100
-      args:
-        creates: /etc/kubernetes/admin.conf
+      command: >
+        kubeadm init
+        --apiserver-advertise-address=192.168.56.100
+        --pod-network-cidr=10.244.0.0/16
+        --node-name ctrl
+      when: not k8s_admin_conf.stat.exists
+
 
     - name: Create .kube directory
       file:
