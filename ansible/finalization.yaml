@@ -2,6 +2,9 @@
 - name: Finalize Cluster Setup
   hosts: all
   become: yes
+  become_user: vagrant
+  environment:
+    KUBECONFIG: /home/vagrant/.kube/config
   tasks:
     - name: Install MetalLB CRDs
       shell: kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
@@ -40,3 +43,129 @@
 
     - name: Apply L2Advertisement
       shell: kubectl apply -f /tmp/metallb-l2.yaml
+
+    - name: Add ingress-nginx Helm repository
+      shell: helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+
+    - name: Update Helm repositories
+      shell: helm repo update
+
+    - name: Create ingress-nginx values file
+      copy:
+        dest: /tmp/ingress-nginx-values.yaml
+        content: |
+          controller:
+            service:
+              loadBalancerIP: 192.168.56.90
+
+    - name: Install Nginx Ingress Controller
+      shell: >
+        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
+        --namespace ingress-nginx
+        --create-namespace
+        -f /tmp/ingress-nginx-values.yaml
+
+    - name: Add kubernetes-dashboard Helm repository
+      shell: helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+
+    - name: Update Helm repositories
+      shell: helm repo update
+
+    - name: Install Kubernetes Dashboard
+      shell: >
+        helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard
+        --namespace kubernetes-dashboard
+        --create-namespace
+
+
+    - name: Create admin-user ServiceAccount
+      copy:
+        dest: /tmp/dashboard-admin.yaml
+        content: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: admin-user
+            namespace: kubernetes-dashboard
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: admin-user
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+          - kind: ServiceAccount
+            name: admin-user
+            namespace: kubernetes-dashboard
+
+    - name: Apply admin-user ServiceAccount
+      shell: kubectl apply -f /tmp/dashboard-admin.yaml
+
+    - name: Create dashboard ingress
+      copy:
+        dest: /tmp/dashboard-ingress.yaml
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: kubernetes-dashboard
+            namespace: kubernetes-dashboard
+            annotations:
+              nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+          spec:
+            ingressClassName: nginx
+            rules:
+            - host: dashboard.local
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: kubernetes-dashboard
+                      port:
+                        number: 443
+
+    - name: Apply dashboard ingress
+      shell: kubectl apply -f /tmp/dashboard-ingress.yaml
+
+    - name: Download Istio
+      get_url:
+        url: https://github.com/istio/istio/releases/download/1.25.2/istio-1.25.2-linux-amd64.tar.gz
+        dest: /tmp/istio.tar.gz
+
+    - name: Extract Istio
+      unarchive:
+        src: /tmp/istio.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Copy istioctl to PATH
+      become: yes
+      become_user: root
+      copy:
+        src: /tmp/istio-1.25.2/bin/istioctl
+        dest: /usr/local/bin/istioctl
+        mode: '0755'
+        remote_src: yes
+
+    - name: Create Istio config
+      copy:
+        dest: /tmp/istio-config.yaml
+        content: |
+          apiVersion: install.istio.io/v1alpha1
+          kind: IstioOperator
+          spec:
+            components:
+              ingressGateways:
+              - name: istio-ingressgateway
+                enabled: true
+                k8s:
+                  service:
+                    loadBalancerIP: 192.168.56.91
+
+    - name: Install Istio
+      shell: istioctl install -y -f /tmp/istio-config.yaml

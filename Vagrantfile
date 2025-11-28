@@ -1,7 +1,7 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-NUM_WORKERS = 2
+NUM_WORKERS = 1
 
 Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-24.04"
@@ -10,7 +10,7 @@ Vagrant.configure("2") do |config|
   # Control node - Step 1 
   config.vm.define "ctrl" do |ctrl|
     ctrl.vm.hostname = "ctrl"
-   ctrl.vm.network "private_network", ip: "192.168.56.100", virtualbox__intnet: "k8snet"
+    ctrl.vm.network "private_network", ip: "192.168.56.100"
     
     ctrl.vm.provider "virtualbox" do |vb|
       vb.memory = "4096"
@@ -34,7 +34,7 @@ Vagrant.configure("2") do |config|
   (1..NUM_WORKERS).each do |i|
     config.vm.define "node-#{i}" do |node|
       node.vm.hostname = "node-#{i}"
-      node.vm.network "private_network", ip: "192.168.56.#{100 + i}", virtualbox__intnet: "k8snet"
+      node.vm.network "private_network", ip: "192.168.56.#{100 + i}"
       
       node.vm.provider "virtualbox" do |vb|
         vb.memory = "6144"
