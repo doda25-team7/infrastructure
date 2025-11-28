@@ -16,7 +16,6 @@
         --node-name ctrl
       when: not k8s_admin_conf.stat.exists
 
-
     - name: Create .kube directory
       file:
         path: /home/vagrant/.kube
@@ -41,10 +40,19 @@
         remote_src: yes
         mode: '0644'
 
+    - name: Copy kube-flannel manifest into controller
+      copy:
+        src: /vagrant/k8s/kube-flannel.yml
+        dest: /home/vagrant/kube-flannel.yml
+        owner: vagrant
+        group: vagrant
+        mode: '0644'
 
     - name: Install Flannel CNI
       become_user: vagrant
-      shell: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      command: kubectl apply -f /home/vagrant/kube-flannel.yml
       args:
         creates: /home/vagrant/.kube/flannel-installed
 
