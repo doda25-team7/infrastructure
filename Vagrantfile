@@ -5,6 +5,7 @@ NUM_WORKERS = 2
 
 Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-24.04"
+  config.vm.box_architecture = "amd64"
 
   # Control node - Step 1 
   config.vm.define "ctrl" do |ctrl|
