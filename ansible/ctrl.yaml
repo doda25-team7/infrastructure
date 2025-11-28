@@ -87,8 +87,8 @@
             mode: '0755'
             remote_src: yes
 
-        - name: Save join command
-          copy:
-            content: "{{ join_command.stdout }}"
-            dest: /vagrant/join-command.sh
-            mode: '0755'
+    - name: Save join command
+      copy:
+        content: "{{ join_command.stdout }}"
+        dest: /vagrant/join-command.sh
+        mode: '0755'
