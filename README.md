@@ -49,7 +49,7 @@ vagrant up
 ### Finalizing the Cluster Setup
 
 ```bash
-ansible-playbook-u vagrant-i 192.168.68.100, finalization.yml
+ansible-playbook -i ansible/inventory.ini ansible/finalization.yaml
 ```
 ### If KVM is conflicting temporarily disable it 
 ```bash
@@ -99,11 +99,99 @@ Resources and VM configs can be adjusted in the `Vagrantfile`:
 log in the ctrl node and do `kubectl get nodes`
 
 ## Access the Dashboard
-1. register `add 192.168.68.90` as dashboard.local in the hosts list of the host machine
-2. access `http://dashboard.local/` via your browser, you should see an interface to enter token
-* if it doesn't work, try log into the ctrl machine and execute `sudo ip addr add 192.168.68.90/24 dev eth1`
-3. log into the ctrl machine and execute `kubectl -n kubernetes-dashboard create token admin-user` paste the token 
-in the dashboard interface.
+
+### Step 1: Add dashboard.local to your hosts file
+
+**On macOS/Linux:**
+```bash
+sudo nano /etc/hosts
+```
+Add this line at the end of the file:
+```
+192.168.68.90    dashboard.local
+```
+Save and exit (Ctrl+X, then Y, then Enter in nano).
+
+**On Windows:**
+1. Open Notepad as Administrator
+2. Open `C:\Windows\System32\drivers\etc\hosts`
+3. Add this line at the end:
+```
+192.168.68.90    dashboard.local
+```
+4. Save the file
+
+### Step 2: Verify the cluster is ready
+
+First, make sure your VMs are running and the finalization playbook has been executed:
+```bash
+vagrant status
+```
+
+If the finalization hasn't been run yet, execute it:
+```bash
+cd infrastructure
+ansible-playbook -i ansible/inventory.ini ansible/finalization.yaml
+```
+
+### Step 3: Get the authentication token
+
+SSH into the control node:
+```bash
+vagrant ssh ctrl
+```
+
+Once inside the ctrl VM, generate the token:
+```bash
+kubectl -n kubernetes-dashboard create token admin-user
+```
+
+Copy the entire token that is displayed (it will be a long string).
+
+### Step 4: Access the dashboard
+
+1. Open your web browser
+2. Navigate to: `http://dashboard.local/`
+3. You should see a login page asking for a token
+4. Paste the token you copied in Step 3
+5. Click "Sign in"
+
+### Troubleshooting
+
+**If `http://dashboard.local/` doesn't work:**
+
+1. First, verify the hosts entry:
+   ```bash
+   # On macOS/Linux
+   cat /etc/hosts | grep dashboard.local
+   
+   # Should show: 192.168.68.90    dashboard.local
+   ```
+
+2. Try accessing by IP directly:
+   ```bash
+   # Test if the IP is reachable
+   ping 192.168.68.90
+   ```
+
+3. If ping fails, check if the ingress controller is running:
+   ```bash
+   vagrant ssh ctrl
+   kubectl get pods -n ingress-nginx
+   kubectl get svc -n ingress-nginx
+   ```
+
+4. If needed, manually add the IP to the control node's interface:
+   ```bash
+   vagrant ssh ctrl
+   sudo ip addr add 192.168.68.90/24 dev eth1
+   ```
+
+5. Verify the dashboard ingress is configured:
+   ```bash
+   vagrant ssh ctrl
+   kubectl get ingress -n kubernetes-dashboard
+   ```
 
 ## NOTES
 login the ctrl and use `systemctl restart` to restart failed service of any service failed in k8s
