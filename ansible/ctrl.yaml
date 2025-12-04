@@ -67,28 +67,29 @@
       shell: kubeadm token create --print-join-command
       register: join_command
 
-    - name: Install Helm via binary
+    - name: Install Helm via installation script
       block:
-        - name: Download Helm binary
+        - name: Download Helm installer
           get_url:
-            url: https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz
-            dest: /tmp/helm.tar.gz
+            url: https://github.com/helm/helm/raw/5ae85868d45ca7bb9ac3ef7a10e0db54b8a8695c/scripts/get-helm-4
+            dest: /tmp/get-helm.sh
+            mode: '0744'            
 
-        - name: Extract Helm
-          unarchive:
-            src: /tmp/helm.tar.gz
-            dest: /tmp/
-            remote_src: yes
+        - name: Execute Helm installer
+          shell: /tmp/get-helm.sh
+        
+        - name: Remove Helm installer
+          file:
+            path: /tmp/get-helm.sh
+            state: absent
 
-        - name: Move Helm to /usr/local/bin
-          copy:
-            src: /tmp/linux-amd64/helm
-            dest: /usr/local/bin/helm
-            mode: '0755'
-            remote_src: yes
+    - name: Install Helm-Diff
+      shell: "helm plugin install https://github.com/databus23/helm-diff --version=3.14.1 --verify=false"
+      args:
+        creates: ~/.local/share/helm/plugins/helm-diff/README.md
 
-        - name: Save join command
-          copy:
-            content: "{{ join_command.stdout }}"
-            dest: /vagrant/join-command.sh
-            mode: '0755'
+    - name: Save join command
+      copy:
+        content: "{{ join_command.stdout }}"
+        dest: /vagrant/join-command.sh
+        mode: '0755'

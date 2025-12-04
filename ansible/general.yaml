@@ -79,8 +79,8 @@
         state: directory
         mode: '0755'
 
-    - name: Add Kubernetes apt signing key from local file
-      shell: gpg --dearmor < /vagrant/Release.key > /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    - name: Add Kubernetes apt signing key
+      shell: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       args:
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
