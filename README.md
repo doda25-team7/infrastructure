@@ -88,5 +88,9 @@ Resources and VM configs can be adjusted in the `Vagrantfile`:
 - For control node: Modify `vb.memory` and `vb.cpus` in the `ctrl` block
 - For worker nodes: Modify `vb.memory` and `vb.cpus` in the worker node block
 
+## Check the network status
+log in the ctrl node and do `kubectl get nodes`
+
+
 ## NOTES
 login the ctrl and use `systemctl restart` to restart failed service of any service failed in k8s
