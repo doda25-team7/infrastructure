@@ -1,6 +1,7 @@
 ---
 - name: Finalize Cluster Setup
-  hosts: all
+#  hosts: localhost
+  hosts: ctrl
   become: yes
   become_user: vagrant
   environment:
@@ -23,7 +24,7 @@
             namespace: metallb-system
           spec:
             addresses:
-              - 192.168.56.90-192.168.56.99
+              - 192.168.68.90-192.168.68.99
 
     - name: Apply IPAddressPool
       shell: kubectl apply -f /tmp/metallb-pool.yaml
@@ -56,7 +57,10 @@
         content: |
           controller:
             service:
-              loadBalancerIP: 192.168.56.90
+              loadBalancerIP: 192.168.68.90
+
+    - name: Delete ingress-nginx service (force IP update)
+      shell: kubectl delete svc -n ingress-nginx ingress-nginx-controller --ignore-not-found=true
 
     - name: Install Nginx Ingress Controller
       shell: >
@@ -64,6 +68,10 @@
         --namespace ingress-nginx
         --create-namespace
         -f /tmp/ingress-nginx-values.yaml
+
+    - name: Wait for ingress-nginx to be ready
+      shell: kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+
 
     - name: Add kubernetes-dashboard Helm repository
       shell: helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
@@ -125,7 +133,7 @@
                   pathType: Prefix
                   backend:
                     service:
-                      name: kubernetes-dashboard
+                      name: kubernetes-dashboard-kong-proxy
                       port:
                         number: 443
 
@@ -165,7 +173,10 @@
                 enabled: true
                 k8s:
                   service:
-                    loadBalancerIP: 192.168.56.91
+                    loadBalancerIP: 192.168.68.91
+
+    - name: Delete istio-ingressgateway service
+      shell: kubectl delete svc -n istio-system istio-ingressgateway --ignore-not-found=true
 
     - name: Install Istio
       shell: istioctl install -y -f /tmp/istio-config.yaml

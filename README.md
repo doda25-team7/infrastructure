@@ -35,14 +35,21 @@ NUM_WORKERS = 2  # Change this number to scale up or down
 
 ## Network Configuration
 
-- Control node: `192.168.56.100`
-- Worker node-N: `192.168.56.{100+N}`
+- Control node: `192.168.68.100`
+- Worker node-N: `192.168.68.{100+N}`
+- Ingress controller: `192.168.68.90`
 
 ## Usage
 
 ### Start all VMs
 ```bash
 vagrant up
+```
+
+### Finalizing the Cluster Setup
+
+```bash
+ansible-playbook-u vagrant-i 192.168.68.100, finalization.yml
 ```
 ### If KVM is conflicting temporarily disable it 
 ```bash
@@ -91,6 +98,12 @@ Resources and VM configs can be adjusted in the `Vagrantfile`:
 ## Check the network status
 log in the ctrl node and do `kubectl get nodes`
 
+## Access the Dashboard
+1. register `add 192.168.68.90` as dashboard.local in the hosts list of the host machine
+2. access `http://dashboard.local/` via your browser, you should see an interface to enter token
+* if it doesn't work, try log into the ctrl machine and execute `sudo ip addr add 192.168.68.90/24 dev eth1`
+3. log into the ctrl machine and execute `kubectl -n kubernetes-dashboard create token admin-user` paste the token 
+in the dashboard interface.
 
 ## NOTES
 login the ctrl and use `systemctl restart` to restart failed service of any service failed in k8s
