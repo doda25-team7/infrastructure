@@ -1,0 +1,315 @@
+---
+- name: Finalize Cluster Setup
+  hosts: all
+  become: yes
+  become_user: vagrant
+  environment:
+    KUBECONFIG: /home/vagrant/.kube/config
+  tasks:
+    - name: Install MetalLB CRDs
+      shell: kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
+
+    - name: Wait for MetalLB controller to be ready
+      shell: kubectl wait -n metallb-system -l app=metallb,component=controller --for=condition=ready pod --timeout=60s
+
+    - name: Create IPAddressPool
+      copy:
+        dest: /tmp/metallb-pool.yaml
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: default-pool
+            namespace: metallb-system
+          spec:
+            addresses:
+              - 192.168.68.90-192.168.68.99
+
+    - name: Apply IPAddressPool
+      shell: kubectl apply -f /tmp/metallb-pool.yaml
+
+    - name: Create L2Advertisement
+      copy:
+        dest: /tmp/metallb-l2.yaml
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: default
+            namespace: metallb-system
+          spec:
+            ipAddressPools:
+              - default-pool
+
+    - name: Apply L2Advertisement
+      shell: kubectl apply -f /tmp/metallb-l2.yaml
+
+    - name: Remove existing Helm binary if corrupted
+      become: yes
+      become_user: root
+      file:
+        path: /usr/local/bin/helm
+        state: absent
+
+    - name: Install Helm using official script
+      become: yes
+      become_user: root
+      shell: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: Verify Helm installation
+      shell: helm version --client
+      register: helm_verify
+      failed_when: helm_verify.rc != 0
+
+    - name: Add ingress-nginx Helm repository
+      shell: helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+
+    - name: Update Helm repositories
+      shell: helm repo update
+
+    - name: Create ingress-nginx values file
+      copy:
+        dest: /tmp/ingress-nginx-values.yaml
+        content: |
+          controller:
+            service:
+              loadBalancerIP: 192.168.68.90
+
+    - name: Delete ingress-nginx service (force IP update)
+      shell: kubectl delete svc -n ingress-nginx ingress-nginx-controller --ignore-not-found=true
+
+    - name: Install Nginx Ingress Controller
+      shell: >
+        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
+        --namespace ingress-nginx
+        --create-namespace
+        -f /tmp/ingress-nginx-values.yaml
+
+    - name: Wait for ingress-nginx to be ready
+      shell: kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+
+
+    - name: Add kubernetes-dashboard Helm repository
+      shell: helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+
+    - name: Update Helm repositories
+      shell: helm repo update
+
+    - name: Create dashboard values file
+      copy:
+        dest: /tmp/dashboard-values.yaml
+        content: |
+          protocolHttp: false
+          metricsScraper:
+            enabled: true
+
+    - name: Install Kubernetes Dashboard
+      shell: >
+        helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard
+        --namespace kubernetes-dashboard
+        --create-namespace
+        -f /tmp/dashboard-values.yaml
+
+    - name: Wait for dashboard to be ready
+      shell: |
+        # Wait for pods to appear first
+        for i in {1..30}; do
+          if kubectl get pods -n kubernetes-dashboard --no-headers 2>/dev/null | grep -q .; then
+            break
+          fi
+          sleep 2
+        done
+        # Wait for any pod in the namespace to be ready
+        kubectl wait --namespace kubernetes-dashboard --for=condition=ready pod --all --timeout=120s
+      failed_when: false
+
+    - name: Create admin-user ServiceAccount
+      copy:
+        dest: /tmp/dashboard-admin.yaml
+        content: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: admin-user
+            namespace: kubernetes-dashboard
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: admin-user
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+          - kind: ServiceAccount
+            name: admin-user
+            namespace: kubernetes-dashboard
+
+    - name: Apply admin-user ServiceAccount
+      shell: kubectl apply -f /tmp/dashboard-admin.yaml
+
+    - name: Wait for dashboard service to have endpoints
+      shell: |
+        for i in {1..30}; do
+          if kubectl get endpoints -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      failed_when: false
+
+    - name: Get dashboard service port
+      shell: |
+        PORT=$(kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o jsonpath='{.spec.ports[?(@.name=="https" || @.name=="dashboard-https")].port}' 2>/dev/null)
+        if [ -z "$PORT" ]; then
+          PORT=$(kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o jsonpath='{.spec.ports[0].port}' 2>/dev/null)
+        fi
+        echo "${PORT:-443}"
+      register: dashboard_port
+      changed_when: false
+      failed_when: false
+
+    - name: Set dashboard port fact
+      set_fact:
+        dashboard_service_port: "{{ dashboard_port.stdout | default('443') | trim }}"
+
+    - name: Create dashboard ingress
+      copy:
+        dest: /tmp/dashboard-ingress.yaml
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: kubernetes-dashboard
+            namespace: kubernetes-dashboard
+            annotations:
+              nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+          spec:
+            ingressClassName: nginx
+            rules:
+            - host: dashboard.local
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: kubernetes-dashboard-kong-proxy
+                      port:
+                        number: {{ dashboard_service_port | int }}
+
+    - name: Apply dashboard ingress
+      shell: kubectl apply -f /tmp/dashboard-ingress.yaml
+
+    - name: Initialize istioctl_working fact
+      set_fact:
+        istioctl_working: false
+
+    - name: Install Istio using official method
+      block:
+        - name: Remove existing istioctl if corrupted
+          become: yes
+          become_user: root
+          file:
+            path: /usr/local/bin/istioctl
+            state: absent
+
+        - name: Download and install istioctl
+          become: yes
+          become_user: root
+          shell: |
+            set -e
+            export HOME=/root
+            curl -sL https://istio.io/downloadIstioctl | sh -
+            if [ -f "$HOME/.istioctl/bin/istioctl" ]; then
+              mv "$HOME/.istioctl/bin/istioctl" /usr/local/bin/istioctl
+              chmod +x /usr/local/bin/istioctl
+            else
+              echo "Error: istioctl binary not found after download"
+              exit 1
+            fi
+          args:
+            creates: /usr/local/bin/istioctl
+
+        - name: Verify istioctl binary exists and is executable
+          become: yes
+          become_user: root
+          stat:
+            path: /usr/local/bin/istioctl
+          register: istioctl_binary
+
+        - name: Verify istioctl binary can execute
+          become: yes
+          become_user: root
+          shell: |
+            # Check if binary can execute at all (even if version fails, binary might still work)
+            if /usr/local/bin/istioctl help >/dev/null 2>&1; then
+              echo "SUCCESS"
+              /usr/local/bin/istioctl help | head -2
+            else
+              # If help fails, try to see what the actual error is
+              /usr/local/bin/istioctl 2>&1 | head -5 || echo "ERROR: Cannot execute binary"
+            fi
+          register: istioctl_verify
+          failed_when: false
+          changed_when: false
+          when: istioctl_binary.stat.exists
+
+        - name: Set istioctl_working fact (binary exists and can execute)
+          set_fact:
+            istioctl_working: "{{ istioctl_binary.stat.exists and 'ERROR' not in istioctl_verify.stdout | default('') }}"
+
+        - name: Show istioctl verification result
+          debug:
+            msg: "{{ 'istioctl binary verified - proceeding with installation' if istioctl_working else 'istioctl binary exists but cannot execute. Output: ' + istioctl_verify.stdout | default('N/A') }}"
+      rescue:
+        - name: Set istioctl_working to false on failure
+          set_fact:
+            istioctl_working: false
+        - name: Warn about Istio installation failure
+          debug:
+            msg: "Istio installation failed, but continuing with dashboard setup..."
+
+    - name: Create Istio config
+      copy:
+        dest: /tmp/istio-config.yaml
+        content: |
+          apiVersion: install.istio.io/v1alpha1
+          kind: IstioOperator
+          spec:
+            components:
+              ingressGateways:
+              - name: istio-ingressgateway
+                enabled: true
+                k8s:
+                  service:
+                    loadBalancerIP: 192.168.68.91
+      when: istioctl_working
+
+    - name: Delete istio-ingressgateway service
+      shell: kubectl delete svc -n istio-system istio-ingressgateway --ignore-not-found=true
+      when: istioctl_working
+
+    - name: Install Istio
+      shell: /usr/local/bin/istioctl install -y -f /tmp/istio-config.yaml
+      when: istioctl_working
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      register: istio_install
+
+    - name: Wait for Istio pods to be ready
+      shell: kubectl wait --namespace istio-system --for=condition=ready pod --all --timeout=300s
+      when: istioctl_working
+      failed_when: false
+
+    - name: Show Istio installation success
+      debug:
+        msg: "Istio installed successfully! Istio ingress gateway will be available at 192.168.68.91"
+      when: istioctl_working | bool

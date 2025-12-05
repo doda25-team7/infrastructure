@@ -8,3 +8,5 @@
         path: /vagrant/join-command.sh
         timeout: 300
 
+    - name: Run Join Command
+      shell: sh /vagrant/join-command.sh
