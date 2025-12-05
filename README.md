@@ -193,5 +193,90 @@ Copy the entire token that is displayed (it will be a long string).
    kubectl get ingress -n kubernetes-dashboard
    ```
 
+**If you get "Unauthorized (401): Invalid credentials provided" error:**
+
+1. First, verify the ingress is pointing to the correct service:
+   ```bash
+   vagrant ssh ctrl
+   kubectl get ingress -n kubernetes-dashboard -o yaml
+   kubectl get svc -n kubernetes-dashboard
+   ```
+   The ingress should point to service `kubernetes-dashboard-kong-proxy` on port 443.
+
+2. Regenerate a fresh token (tokens expire quickly):
+   ```bash
+   vagrant ssh ctrl
+   kubectl -n kubernetes-dashboard create token admin-user
+   ```
+   Copy the entire token immediately and use it within a few minutes.
+
+3. Verify the admin-user ServiceAccount exists and has proper permissions:
+   ```bash
+   vagrant ssh ctrl
+   kubectl get sa -n kubernetes-dashboard admin-user
+   kubectl get clusterrolebinding admin-user
+   ```
+
+4. If the issue persists, try accessing the dashboard directly via port-forward (bypassing ingress):
+   ```bash
+   vagrant ssh ctrl
+   kubectl port-forward -n kubernetes-dashboard service/kubernetes-dashboard 8443:443
+   ```
+   Then access `https://localhost:8443` in your browser (accept the self-signed certificate warning) and try the token again.
+
+5. If you've updated the finalization.yaml file, re-run the finalization playbook:
+   ```bash
+   cd infrastructure
+   ansible-playbook -i ansible/inventory.ini ansible/finalization.yaml
+   ```
+
+**If you get "503 Service Temporarily Unavailable" error:**
+
+1. Check if the dashboard service exists and has endpoints:
+   ```bash
+   vagrant ssh ctrl
+   kubectl get svc -n kubernetes-dashboard
+   kubectl get endpoints -n kubernetes-dashboard kubernetes-dashboard-kong-proxy
+   kubectl get pods -n kubernetes-dashboard
+   ```
+   The service `kubernetes-dashboard-kong-proxy` should have endpoints (IP addresses), and pods should be in "Running" state.
+
+2. Verify the ingress is pointing to the correct service and port:
+   ```bash
+   vagrant ssh ctrl
+   kubectl get ingress -n kubernetes-dashboard -o yaml
+   kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o yaml
+   ```
+   Check that:
+   - The ingress service name is `kubernetes-dashboard-kong-proxy`
+   - The ingress port matches the service port (should be 443)
+
+3. Check ingress controller logs for errors:
+   ```bash
+   vagrant ssh ctrl
+   kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=50
+   ```
+   Look for connection errors or backend errors.
+
+4. Test direct access to the dashboard service (bypassing ingress):
+   ```bash
+   vagrant ssh ctrl
+   kubectl port-forward -n kubernetes-dashboard service/kubernetes-dashboard-kong-proxy 8443:443
+   ```
+   Then try accessing `https://localhost:8443` in your browser (accept the self-signed certificate warning). If this works, the issue is with the ingress configuration.
+
+5. If the service port is 8443 instead of 443, you may need to update the ingress manually:
+   ```bash
+   vagrant ssh ctrl
+   kubectl edit ingress -n kubernetes-dashboard kubernetes-dashboard
+   ```
+   Change the port number from 443 to 8443 if needed.
+
+6. Re-run the finalization playbook to ensure everything is configured correctly:
+   ```bash
+   cd infrastructure
+   ansible-playbook -i ansible/inventory.ini ansible/finalization.yaml
+   ```
+
 ## NOTES
 login the ctrl and use `systemctl restart` to restart failed service of any service failed in k8s

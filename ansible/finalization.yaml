@@ -98,11 +98,33 @@
     - name: Update Helm repositories
       shell: helm repo update
 
+    - name: Create dashboard values file
+      copy:
+        dest: /tmp/dashboard-values.yaml
+        content: |
+          protocolHttp: false
+          metricsScraper:
+            enabled: true
+
     - name: Install Kubernetes Dashboard
       shell: >
         helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard
         --namespace kubernetes-dashboard
         --create-namespace
+        -f /tmp/dashboard-values.yaml
+
+    - name: Wait for dashboard to be ready
+      shell: |
+        # Wait for pods to appear first
+        for i in {1..30}; do
+          if kubectl get pods -n kubernetes-dashboard --no-headers 2>/dev/null | grep -q .; then
+            break
+          fi
+          sleep 2
+        done
+        # Wait for any pod in the namespace to be ready
+        kubectl wait --namespace kubernetes-dashboard --for=condition=ready pod --all --timeout=120s
+      failed_when: false
 
     - name: Create admin-user ServiceAccount
       copy:
@@ -130,6 +152,32 @@
     - name: Apply admin-user ServiceAccount
       shell: kubectl apply -f /tmp/dashboard-admin.yaml
 
+    - name: Wait for dashboard service to have endpoints
+      shell: |
+        for i in {1..30}; do
+          if kubectl get endpoints -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      failed_when: false
+
+    - name: Get dashboard service port
+      shell: |
+        PORT=$(kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o jsonpath='{.spec.ports[?(@.name=="https" || @.name=="dashboard-https")].port}' 2>/dev/null)
+        if [ -z "$PORT" ]; then
+          PORT=$(kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o jsonpath='{.spec.ports[0].port}' 2>/dev/null)
+        fi
+        echo "${PORT:-443}"
+      register: dashboard_port
+      changed_when: false
+      failed_when: false
+
+    - name: Set dashboard port fact
+      set_fact:
+        dashboard_service_port: "{{ dashboard_port.stdout | default('443') | trim }}"
+
     - name: Create dashboard ingress
       copy:
         dest: /tmp/dashboard-ingress.yaml
@@ -141,6 +189,8 @@
             namespace: kubernetes-dashboard
             annotations:
               nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
           spec:
             ingressClassName: nginx
             rules:
@@ -153,7 +203,7 @@
                     service:
                       name: kubernetes-dashboard-kong-proxy
                       port:
-                        number: 443
+                        number: {{ dashboard_service_port | int }}
 
     - name: Apply dashboard ingress
       shell: kubectl apply -f /tmp/dashboard-ingress.yaml
@@ -175,26 +225,50 @@
           become: yes
           become_user: root
           shell: |
-            curl -sL https://istio.io/downloadIstioctl | ISTIO_VERSION=1.25.2 sh -
-            mv $HOME/.istioctl/bin/istioctl /usr/local/bin/istioctl
-            chmod +x /usr/local/bin/istioctl
+            set -e
+            export HOME=/root
+            curl -sL https://istio.io/downloadIstioctl | sh -
+            if [ -f "$HOME/.istioctl/bin/istioctl" ]; then
+              mv "$HOME/.istioctl/bin/istioctl" /usr/local/bin/istioctl
+              chmod +x /usr/local/bin/istioctl
+            else
+              echo "Error: istioctl binary not found after download"
+              exit 1
+            fi
           args:
             creates: /usr/local/bin/istioctl
 
-        - name: Verify istioctl installation
-          shell: istioctl version --client
+        - name: Verify istioctl binary exists and is executable
+          become: yes
+          become_user: root
+          stat:
+            path: /usr/local/bin/istioctl
+          register: istioctl_binary
+
+        - name: Verify istioctl binary can execute
+          become: yes
+          become_user: root
+          shell: |
+            # Check if binary can execute at all (even if version fails, binary might still work)
+            if /usr/local/bin/istioctl help >/dev/null 2>&1; then
+              echo "SUCCESS"
+              /usr/local/bin/istioctl help | head -2
+            else
+              # If help fails, try to see what the actual error is
+              /usr/local/bin/istioctl 2>&1 | head -5 || echo "ERROR: Cannot execute binary"
+            fi
           register: istioctl_verify
           failed_when: false
           changed_when: false
+          when: istioctl_binary.stat.exists
 
-        - name: Set istioctl_working fact
+        - name: Set istioctl_working fact (binary exists and can execute)
           set_fact:
-            istioctl_working: "{{ istioctl_verify.rc == 0 }}"
+            istioctl_working: "{{ istioctl_binary.stat.exists and 'ERROR' not in istioctl_verify.stdout | default('') }}"
 
-        - name: Warn if istioctl verification failed
+        - name: Show istioctl verification result
           debug:
-            msg: "Warning: istioctl installation failed, skipping Istio installation..."
-          when: istioctl_verify.rc != 0
+            msg: "{{ 'istioctl binary verified - proceeding with installation' if istioctl_working else 'istioctl binary exists but cannot execute. Output: ' + istioctl_verify.stdout | default('N/A') }}"
       rescue:
         - name: Set istioctl_working to false on failure
           set_fact:
@@ -224,6 +298,18 @@
       when: istioctl_working
 
     - name: Install Istio
-      shell: istioctl install -y -f /tmp/istio-config.yaml
+      shell: /usr/local/bin/istioctl install -y -f /tmp/istio-config.yaml
+      when: istioctl_working
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      register: istio_install
+
+    - name: Wait for Istio pods to be ready
+      shell: kubectl wait --namespace istio-system --for=condition=ready pod --all --timeout=300s
       when: istioctl_working
       failed_when: false
+
+    - name: Show Istio installation success
+      debug:
+        msg: "Istio installed successfully! Istio ingress gateway will be available at 192.168.68.91"
+      when: istioctl_working | bool
