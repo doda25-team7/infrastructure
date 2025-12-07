@@ -42,7 +42,7 @@
 
     - name: Copy kube-flannel manifest into controller
       copy:
-        src: /vagrant/k8s/kube-flannel.yml
+        src: /vagrant/operations/kube-flannel.yml
         dest: /home/vagrant/kube-flannel.yml
         owner: vagrant
         group: vagrant
@@ -69,10 +69,11 @@
 
     - name: Install Helm via binary
       block:
-        - name: Download Helm binary
-          get_url:
-            url: https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz
+        - name: Copy Helm from operations folder
+          copy:
+            src: files/helm-v3.14.0-linux-amd64.tar.gz
             dest: /tmp/helm.tar.gz
+            mode: '0644'
 
         - name: Extract Helm
           unarchive:
@@ -86,7 +87,17 @@
             dest: /usr/local/bin/helm
             mode: '0755'
             remote_src: yes
+          register: helm_installed
 
+<<<<<<< HEAD
+=======
+        - name: Remove temporary extraction folder
+          file:
+            path: /tmp/linux-amd64
+            state: absent
+          when: helm_installed is changed
+
+>>>>>>> 6a5c417 (Added requirements for local provisioning)
     - name: Save join command
       copy:
         content: "{{ join_command.stdout }}"
