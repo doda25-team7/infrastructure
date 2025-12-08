@@ -71,7 +71,7 @@
       block:
         - name: Copy Helm from operations folder
           copy:
-            src: files/helm-v3.14.0-linux-amd64.tar.gz
+            src: operations/helm-v3.14.0-linux-amd64.tar.gz
             dest: /tmp/helm.tar.gz
             mode: '0644'
 
@@ -89,15 +89,12 @@
             remote_src: yes
           register: helm_installed
 
-<<<<<<< HEAD
-=======
         - name: Remove temporary extraction folder
           file:
             path: /tmp/linux-amd64
             state: absent
           when: helm_installed is changed
 
->>>>>>> 6a5c417 (Added requirements for local provisioning)
     - name: Save join command
       copy:
         content: "{{ join_command.stdout }}"
