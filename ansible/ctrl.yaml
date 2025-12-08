@@ -71,7 +71,7 @@
       block:
         - name: Copy Helm from operations folder
           copy:
-            src: operations/helm-v3.14.0-linux-amd64.tar.gz
+            src: ../operations/helm-v3.14.0-linux-amd64.tar.gz
             dest: /tmp/helm.tar.gz
             mode: '0644'
 
