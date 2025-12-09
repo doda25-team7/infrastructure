@@ -229,55 +229,37 @@
             state: absent
 
         # Installing istioctl from local tarball to satisfy offline requirements
-        - name: Copy Istio 1.25.2 tarball to VM
-          become: yes
+        - name: Copy Istio tarball from operations folder
           copy:
             src: ../operations/istio-1.25.2-linux-amd64.tar.gz
-            dest: /tmp/istio-1.25.2-linux-amd64.tar.gz
+            dest: /tmp/istio.tar.gz
             mode: '0644'
 
-        - name: Extract Istio 1.25.2 archive
-          become: yes
+        - name: Extract Istio tarball
           unarchive:
-            src: /tmp/istio-1.25.2-linux-amd64.tar.gz
+            src: /tmp/istio.tar.gz
             dest: /tmp/
             remote_src: yes
+          register: istio_unpacked
 
-        - name: Install istioctl into /usr/local/bin
+        - name: Install (overwrite) istioctl binary with correct permissions
           become: yes
+          become_user: root
           copy:
             src: /tmp/istio-1.25.2/bin/istioctl
             dest: /usr/local/bin/istioctl
             mode: '0755'
             remote_src: yes
 
-        - name: Verify istioctl binary exists and is executable
+        - name: Verify istioctl is working
           become: yes
           become_user: root
-          stat:
-            path: /usr/local/bin/istioctl
-          register: istioctl_binary
+          command: /usr/local/bin/istioctl version --remote=false
+          register: istioctl_check
+          failed_when: istioctl_check.rc != 0
 
-        - name: Verify istioctl binary can execute
-          become: yes
-          become_user: root
-          shell: |
-            # Check if binary can execute at all (even if version fails, binary might still work)
-            if /usr/local/bin/istioctl help >/dev/null 2>&1; then
-              echo "SUCCESS"
-              /usr/local/bin/istioctl help | head -2
-            else
-              # If help fails, try to see what the actual error is
-              /usr/local/bin/istioctl 2>&1 | head -5 || echo "ERROR: Cannot execute binary"
-            fi
-          register: istioctl_verify
-          failed_when: false
-          changed_when: false
-          when: istioctl_binary.stat.exists
-
-        - name: Set istioctl_working fact (binary exists and can execute)
-          set_fact:
-            istioctl_working: "{{ istioctl_binary.stat.exists and 'ERROR' not in istioctl_verify.stdout | default('') }}"
+        - set_fact:
+            istioctl_working: true
 
         - name: Show istioctl verification result
           debug:
@@ -298,6 +280,8 @@
           kind: IstioOperator
           spec:
             components:
+              pilot:
+                enabled: true
               ingressGateways:
               - name: istio-ingressgateway
                 enabled: true
@@ -311,12 +295,13 @@
                --ignore-not-found=true
       when: istioctl_working
 
-    - name: Install Istio
-      shell: /usr/local/bin/istioctl install -y -f /tmp/istio-config.yaml
-      when: istioctl_working
+    - name: Install or upgrade Istio
+      shell: istioctl install -y -f /tmp/istio-config.yaml
+      become_user: vagrant
+      become: yes
       environment:
         KUBECONFIG: /home/vagrant/.kube/config
-      register: istio_install
+      when: istioctl_working
 
     - name: Wait for Istio pods to be ready
       shell: kubectl wait \
