@@ -6,11 +6,23 @@
   environment:
     KUBECONFIG: /home/vagrant/.kube/config
   tasks:
+    # Installing MetalLB from local manifest to satisfy offline requirements
+    - name: Copy MetalLB CRDs file into VM
+      copy:
+        src: ../operations/metallb-native.yaml
+        dest: /home/vagrant/metallb-native.yaml
+        owner: vagrant
+        group: vagrant
+        mode: '0644'
+
     - name: Install MetalLB CRDs
-      shell: kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
+      shell: kubectl apply -f /home/vagrant/metallb-native.yaml
 
     - name: Wait for MetalLB controller to be ready
-      shell: kubectl wait -n metallb-system -l app=metallb,component=controller --for=condition=ready pod --timeout=60s
+      shell: kubectl wait -n metallb-system \
+               -l app=metallb,component=controller \
+               --for=condition=ready pod \
+               --timeout=60s
 
     - name: Create IPAddressPool
       copy:
@@ -44,25 +56,15 @@
     - name: Apply L2Advertisement
       shell: kubectl apply -f /tmp/metallb-l2.yaml
 
-    - name: Remove existing Helm binary if corrupted
-      become: yes
-      become_user: root
-      file:
+    - name: Check if Helm exists
+      stat:
         path: /usr/local/bin/helm
-        state: absent
+      register: helm_binary
 
-    - name: Install Helm using official script
-      become: yes
-      become_user: root
-      shell: |
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      args:
-        creates: /usr/local/bin/helm
-
-    - name: Verify Helm installation
-      shell: helm version --client
-      register: helm_verify
-      failed_when: helm_verify.rc != 0
+    - name: Fail if Helm is missing
+      fail:
+        msg: "Helm binary missing—installation in ctrl.yaml likely failed."
+      when: not (helm_binary.stat.exists | default(false))
 
     - name: Add ingress-nginx Helm repository
       shell: helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
@@ -79,18 +81,23 @@
               loadBalancerIP: 192.168.68.90
 
     - name: Delete ingress-nginx service (force IP update)
-      shell: kubectl delete svc -n ingress-nginx ingress-nginx-controller --ignore-not-found=true
+      shell: kubectl delete svc -n ingress-nginx ingress-nginx-controller \
+               --ignore-not-found=true
 
     - name: Install Nginx Ingress Controller
       shell: >
-        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
-        --namespace ingress-nginx
-        --create-namespace
-        -f /tmp/ingress-nginx-values.yaml
+        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+          --namespace ingress-nginx \
+          --create-namespace \
+          -f /tmp/ingress-nginx-values.yaml \
+          --wait
 
     - name: Wait for ingress-nginx to be ready
-      shell: kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
-
+      shell: kubectl wait \
+               --namespace ingress-nginx \
+               --for=condition=ready pod \
+               --selector=app.kubernetes.io/component=controller \
+               --timeout=120s
 
     - name: Add kubernetes-dashboard Helm repository
       shell: helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
@@ -221,50 +228,38 @@
             path: /usr/local/bin/istioctl
             state: absent
 
-        - name: Download and install istioctl
+        # Installing istioctl from local tarball to satisfy offline requirements
+        - name: Copy Istio tarball from operations folder
+          copy:
+            src: ../operations/istio-1.25.2-linux-amd64.tar.gz
+            dest: /tmp/istio.tar.gz
+            mode: '0644'
+
+        - name: Extract Istio tarball
+          unarchive:
+            src: /tmp/istio.tar.gz
+            dest: /tmp/
+            remote_src: yes
+          register: istio_unpacked
+
+        - name: Install (overwrite) istioctl binary with correct permissions
           become: yes
           become_user: root
-          shell: |
-            set -e
-            export HOME=/root
-            curl -sL https://istio.io/downloadIstioctl | sh -
-            if [ -f "$HOME/.istioctl/bin/istioctl" ]; then
-              mv "$HOME/.istioctl/bin/istioctl" /usr/local/bin/istioctl
-              chmod +x /usr/local/bin/istioctl
-            else
-              echo "Error: istioctl binary not found after download"
-              exit 1
-            fi
-          args:
-            creates: /usr/local/bin/istioctl
+          copy:
+            src: /tmp/istio-1.25.2/bin/istioctl
+            dest: /usr/local/bin/istioctl
+            mode: '0755'
+            remote_src: yes
 
-        - name: Verify istioctl binary exists and is executable
+        - name: Verify istioctl is working
           become: yes
           become_user: root
-          stat:
-            path: /usr/local/bin/istioctl
-          register: istioctl_binary
+          command: /usr/local/bin/istioctl version --remote=false
+          register: istioctl_check
+          failed_when: istioctl_check.rc != 0
 
-        - name: Verify istioctl binary can execute
-          become: yes
-          become_user: root
-          shell: |
-            # Check if binary can execute at all (even if version fails, binary might still work)
-            if /usr/local/bin/istioctl help >/dev/null 2>&1; then
-              echo "SUCCESS"
-              /usr/local/bin/istioctl help | head -2
-            else
-              # If help fails, try to see what the actual error is
-              /usr/local/bin/istioctl 2>&1 | head -5 || echo "ERROR: Cannot execute binary"
-            fi
-          register: istioctl_verify
-          failed_when: false
-          changed_when: false
-          when: istioctl_binary.stat.exists
-
-        - name: Set istioctl_working fact (binary exists and can execute)
-          set_fact:
-            istioctl_working: "{{ istioctl_binary.stat.exists and 'ERROR' not in istioctl_verify.stdout | default('') }}"
+        - set_fact:
+            istioctl_working: true
 
         - name: Show istioctl verification result
           debug:
@@ -285,6 +280,8 @@
           kind: IstioOperator
           spec:
             components:
+              pilot:
+                enabled: true
               ingressGateways:
               - name: istio-ingressgateway
                 enabled: true
@@ -294,18 +291,24 @@
       when: istioctl_working
 
     - name: Delete istio-ingressgateway service
-      shell: kubectl delete svc -n istio-system istio-ingressgateway --ignore-not-found=true
+      shell: kubectl delete svc -n istio-system istio-ingressgateway \
+               --ignore-not-found=true
       when: istioctl_working
 
-    - name: Install Istio
-      shell: /usr/local/bin/istioctl install -y -f /tmp/istio-config.yaml
-      when: istioctl_working
+    - name: Install or upgrade Istio
+      shell: istioctl install -y -f /tmp/istio-config.yaml
+      become_user: vagrant
+      become: yes
       environment:
         KUBECONFIG: /home/vagrant/.kube/config
-      register: istio_install
+      when: istioctl_working
 
     - name: Wait for Istio pods to be ready
-      shell: kubectl wait --namespace istio-system --for=condition=ready pod --all --timeout=300s
+      shell: kubectl wait \
+               --namespace istio-system \
+               --for=condition=ready pod \
+               --all \
+               --timeout=300s
       when: istioctl_working
       failed_when: false
 

@@ -278,5 +278,44 @@ Copy the entire token that is displayed (it will be a long string).
    ansible-playbook -i ansible/inventory.ini ansible/finalization.yaml
    ```
 
+**If vagrant up gets stuck on the task "Run Join Command" for node-1**
+
+1. Destroy VMs
+   ```bash
+   vagrant destroy -f
+   ```
+
+2. Open VirtualBox GUI
+3. Go to network tab
+4. Under "Host-only Networks" remove the network corresponding to the destroyed VMs (Usually it's vboxnet0)
+
+5. Start up VMs
+   ```bash
+   vagrant up
+   ```
+
+**If the IP adress configured for configured for the host-only network is not within the allowed ranges**
+
+1. Destroy VMs
+   ```bash
+   vagrant destroy -f
+   ```
+
+2. Open the VirtualBox host-only network configuration file
+   ```bash
+   sudo nano /etc/vbox/networks.conf
+   ```
+
+3. Add following lines into the file:
+      * 10.0.0.0/8 192.168.0.0/16
+      * 2001::/64
+
+4. Start up VMs
+   ```bash
+   vagrant up
+   ```
+
+
+
 ## NOTES
 login the ctrl and use `systemctl restart` to restart failed service of any service failed in k8s
