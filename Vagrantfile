@@ -11,11 +11,14 @@ Vagrant.configure("2") do |config|
   # Control node - Step 1 
   config.vm.define "ctrl" do |ctrl|
     ctrl.vm.hostname = "ctrl"
-    ctrl.vm.network "private_network", ip: "192.168.68.100"
+    ctrl.vm.network "private_network", ip: "192.168.56.100", 
+      virtualbox__intnet: false,
+      nic_type: "virtio"
     
     ctrl.vm.provider "virtualbox" do |vb|
       vb.memory = "4096"
       vb.cpus = 2
+      vb.customize ["modifyvm", :id, "--nicpromisc2", "allow-all"]
     end
 
     # Ansible provisioning for control node - Step 3
@@ -35,11 +38,14 @@ Vagrant.configure("2") do |config|
   (1..NUM_WORKERS).each do |i|
     config.vm.define "node-#{i}" do |node|
       node.vm.hostname = "node-#{i}"
-      node.vm.network "private_network", ip: "192.168.68.#{100 + i}"
+      node.vm.network "private_network", ip: "192.168.56.#{100 + i}",
+        virtualbox__intnet: false,
+        nic_type: "virtio"
       
       node.vm.provider "virtualbox" do |vb|
         vb.memory = "6144"
         vb.cpus = 2
+        vb.customize ["modifyvm", :id, "--nicpromisc2", "allow-all"]
       end
 
       # Ansible provisioning for worker nodes - Step 3
