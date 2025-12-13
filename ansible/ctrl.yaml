@@ -15,15 +15,7 @@
         --pod-network-cidr=10.244.0.0/16
         --node-name ctrl
       when: not k8s_admin_conf.stat.exists
-
-    - name: Allow port 6443 through iptables
-      iptables:
-        chain: INPUT
-        protocol: tcp
-        destination_port: 6443
-        jump: ACCEPT
-        comment: Allow Kubernetes API server
-
+      
     - name: Create .kube directory
       file:
         path: /home/vagrant/.kube
